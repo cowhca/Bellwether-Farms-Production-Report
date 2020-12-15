@@ -1,0 +1,1411 @@
+---
+title: "Production Report"
+output: 
+  html_document:
+    theme: readable
+    toc: true
+    toc_float: true
+# params:
+#   order_file: "on_order_201028_201106.csv"
+#   hand_file: "on_hand_201028.csv"
+#   start_date: "2020-10-28"
+#   end_date: "2020-11-06"
+---
+<style>
+div.main-container {
+    max-width: 95%;
+}
+</style>
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+opts <- options(knitr.kable.NA = "")
+if (!require(janitor)) {
+  install.packages(janitor)
+}
+if (!require(tidyverse)) {
+  install.packages(tidyverse)
+}
+if (!require("kableExtra")) {
+  install.packages("kableExtra")
+}
+if (!require("knitr")) {
+  install.packages("knitr")
+}
+if (!require(lubridate)) {
+  install.packages("lubridate")
+}
+path = "C:/Users/conno/Documents/Everything/Bellwether/production_managment/production_report"
+setwd(path)
+start_date <- lubridate::today() 
+end_date <- start_date + 20 - lubridate::wday(start_date)
+# If today is friday run report for next two weeks
+if (lubridate::wday(start_date) == 6) {
+  end_date <- end_date + 7
+}
+order_file <- paste0("on_order_", start_date, "_", end_date, ".csv")
+hand_file <- paste0("on_hand_", start_date, ".csv")
+
+```
+#### Run for orders from `r start_date` - `r end_date` on `r substr(lubridate::now(), 1, 10)` at `r substr(lubridate::now(), 12, 16)`
+
+```{r include=FALSE}
+order <- read_csv(paste0(path, "/", order_file),
+  col_types = cols(
+    Date = col_date(format = "%m/%d/%Y"),
+    `Date Due` = col_date(format = "%m/%d/%Y")
+  ),
+  skip = 4
+) %>% clean_names()
+# order <- read_csv(paste0(path, "/", "on_order_2020-11-23_2020-12-04_2.csv"),
+#   col_types = cols(
+#     Date = col_date(format = "%m/%d/%Y"),
+#     `Date Due` = col_date(format = "%m/%d/%Y")
+#   ),
+#   skip = 4
+# ) %>% clean_names()
+hand <- hand <- read_csv(paste0(path, "/", hand_file),
+  skip = 4
+) %>% clean_names()
+most_recent_hand_update <- hand$tracking %>% substr(7,14) %>% sort(decreasing = TRUE) %>% head(n = 1)
+most_recent_hand_date <- as.Date(paste(substr(most_recent_hand_update, 5, 8), substr(most_recent_hand_update, 1, 2), substr(most_recent_hand_update, 3, 4), sep = "-"))
+
+# Adding `product` column to give name of product for each row
+order <- order %>% filter(!is.na(order_number))
+for (i in 1:nrow(order)) {
+  if (str_length(order$order_number[i]) > 4) { # If the element is the product name
+    name <- order$order_number[i]
+  } else if (str_length(order$order_number[i]) == 4) {
+    order[i, "product"] <- name
+  }
+}
+
+# Removing unnecessary rows
+order <- order %>% filter(!is.na(date))
+hand <- hand %>% filter(!is.na(description))
+
+
+# Add a region variable to orders so that we can adjust the ship_by date
+east_stores <- c(
+  "EUROPEAN IMPORTS",
+  "KeHe - Bloomington",
+  "FORTUNE FISH & GOURMET",
+  "UNFI - GREENWOOD",
+  "UNFI - HUDSON VALLEY",
+  "UNFI - TWIN CITIES",
+  "KEHE - Dallas",
+  "UNFI - DAYVILLE",
+  "KeHe - Romeoville",
+  "UNFI - CHESTERFIELD",
+  "UNFI - GREENWOOD",
+  "UNFI - HUDSON VALLEY",
+  "UNFI - TWIN CITIES",
+  "UNFI - York",
+  "UNFI - ATLANTA",
+  "CRYSTAL FOODS",
+  "PRAML INTERNALTIONAL",
+  "KeHe - Maryland"
+)
+
+travel_times <- list(
+  c("EUROPEAN IMPORTS", 7),
+  c("KeHe - Bloomington", 7),
+  c("FORTUNE FISH & GOURMET", 7),
+  c("UNFI - GREENWOOD", 7),
+  c("UNFI - HUDSON VALLEY", 7),
+  c("UNFI - TWIN CITIES", 7),
+  c("KEHE - Dallas", 5),
+  c("UNFI - DAYVILLE", 7),
+  c("KeHe - Romeoville", 7),
+  c("UNFI - CHESTERFIELD", 7),
+  c("UNFI - GREENWOOD", 7),
+  c("UNFI - TWIN CITIES", 7),
+  c("UNFI - York", 7),
+  c("UNFI - ATLANTA", 7),
+  c("CRYSTAL FOODS", 7),
+  c("PRAML INTERNALTIONAL", 5),
+  c("KeHe - Maryland", 7),
+  c("MAILORDER", 0),
+  c("DPI - WEST", 0),
+  c("WORLDS BEST CHEESE - WEST", 0),
+  c("TOMALES BAY FOODS", 0),
+  c("TONY'S FINE FOODS", 0),
+  c("DAIRY DELIVERY, INC.", 0),
+  c("COSTCO - TRACY", 0),
+  c("COSTCO-MIRA LOMA (SD)", 0),
+  c("GREENLEAF", 0),
+  c("CHEF'S WAREHOUSE - Hayward", 0),
+  c("NICOLA IMPORTS", 5),
+  c("KeHe - Chino", 0),
+  c("UNFI - ROCKLIN", 0),
+  c("UNFI - RIDGEFIELD", 5),
+  c("UNFI - MORENO VALLEY", 0),
+  c("UNFI - AURORA", 5),
+  c("KEHE - Stockton", 0),
+  c("ANIATA WHOLESALE & DISTRIBUTION", 0),
+  c("KEHE - Portland", 0),
+  c("UNFI - GILROY", 0),
+  c("MARTIN PREFERRED", 5),
+  c("REGALIS", 0),
+  c("NATION PIZZA & FOODS", 5),
+  c("INTEGRATED FOOD SERVICE", 0),
+  c("CHEF'S WAREHOUSE - Los Angeles", 0),
+  c("TRADER JOE'S", 0),
+  c("VESTA - LOS ANGELELS", 0),
+  c("BI RITE", 0),
+  c("KeHe Ellettsville", 7),
+  c("UNFI - IOWA", 5),
+  c("UNFI - LANCASTER", 0),
+  c("DPI - ROCKY MOUNTAIN", 5),
+  c("UNFI - SARASOTA", 7),
+  c("MIKE HUDSON DISTRIBUTING", 0),
+  c("MERLINO", 5),
+  c("KEHE - Flower Mound", 5),
+  c("Tsar Niculai Caviar", 0),
+  c("PETERSON COMPANY", 0),
+  c("ROE CAVIAR", 0),
+  c("DPI - NORTHWEST", 0),
+  c("C & L PRODUCE", 0),
+  c("NATURE'S PRODUCE", 0),
+  c("UNFI - RACINE", 7),
+  c("GFI - DENVER", 1),
+  c("GFI DENVER", 1),
+  c("CREAM AND THE CROP", 0),
+  c("PRIME FISH LLC", 0),
+  c("Twenty Twenty Wine Merchants", 0), 
+  c("Absolute Caviar", 0),
+  c("FROG HOLLOW", 0),
+  c("VESTA - SAN FRANCISCO", 0),
+  c("IMPERFECT FOODS", 0),
+  c("Jake's Finer Food", 3)
+)
+
+travel_destinations <- travel_times %>% sapply("[[", 1)
+getTravelTime <- function (cust_name) {
+  m <- match(cust_name, travel_destinations)
+  if(is.na(m)) {
+    print(paste("We don't have", cust_name, "in the database")) 
+    return(2)
+  } else {
+    return(travel_times[[m]][2])
+  }
+  
+  tryCatch(travel_times[[match(cust_name, travel_destinations)]][2], error = function (x) 2)
+}
+order <- order %>%
+  mutate(
+    region = ifelse(customer_name %in% east_stores, "east", "west"),
+    travel_time = sapply(customer_name, getTravelTime),
+    travel_time = as.integer(travel_time),
+    qty_remaining = ifelse(product == "Creme Fraiche Bucket", qty_remaining / 40, qty_remaining)
+  )
+
+hand <- hand %>%
+  mutate(
+    qty = ifelse(product_number == "Creme Fraiche Bucket", qty / 40, qty)
+  )
+
+
+# Grouping by each product being ordered AND when it is due to ship
+# dues <- order %>%
+#   count(product, date_due, region, travel_time, wt = qty_remaining, name = "ordered")
+dues <- order %>% rename("ordered" = qty_remaining)
+
+# you might be tempted to alse sort by region in order to fill the east coast
+# orders first, but that is wrong. Instead, stick by filling in order of date only
+# because if you put east first then you might exhaust your resources on an order
+# that is later in the week when you haven't filled an order that is due before it
+# also we want to make the cheese closer to shipping date for east because it takes longer to
+# ship
+dues <- dues %>% arrange(date_due)
+
+added_inventory <- read_csv(paste0("added_inventory_", start_date, ".csv"),
+  col_types = cols(expiration = col_date(format = "%m/%d/%Y")))
+added_inventory <- added_inventory %>% mutate(expiration = expiration, arrive_by = expiration - buffer)
+
+
+# Making a table to note each product that we have currently and seperating by when they needed to ship by
+inv <- hand %>%
+  count(product_number, substr(sapply(strsplit(tracking, ","), "[[", 2), 10, 19), wt = qty) %>%
+  rename(expiration = 2) %>%
+  mutate(
+    expiration = as.Date(expiration),
+    buffer = ifelse(str_detect(product_number, "Creme Fraiche"), 45, 0), # Adding buffer before expiration
+    buffer = ifelse(str_detect(product_number, "Basket"), 32, buffer),
+    buffer = ifelse(str_detect(product_number, "Whey"), 15, buffer),
+    buffer = ifelse(str_detect(product_number, "Ricotta WM 2-Pk 3.5lb"), 18, buffer),
+    buffer = ifelse(str_detect(product_number, "Zuni Jersey Ricotta"), 25, buffer),
+    buffer = ifelse(product_number == "Zuni Jersey Ricotta- 3.5lb Tub", 0, buffer),
+    buffer = ifelse(str_detect(product_number, "Retail Crescenza"), 25, buffer),
+    buffer = ifelse(str_detect(product_number, "Carmody"), 60, buffer),
+    buffer = ifelse(str_detect(product_number, "Costco - 16/32oz Plain"), 45, buffer),
+    buffer = ifelse(str_detect(product_number, "Fromage Blanc"), 45, buffer),
+    buffer = ifelse(str_detect(product_number, "Yogurt"), 45, buffer),
+    arrive_by = expiration - buffer
+  ) %>%
+  select(1:2, buffer, arrive_by, n) %>%
+  bind_rows(added_inventory) %>%
+  arrange(arrive_by) # Arranging by arrive_by so that we are sure to remove the products that are closest to expiration first and we remove
+
+# inv <- hand %>%
+#   count(product_number, substr(sapply(strsplit(tracking, ","), "[[", 2), 10, 19), wt = qty) %>%
+#   rename(expiration = 2) %>%
+#   mutate(
+#     expiration = as.Date(expiration),
+#     buffer = ifelse(str_detect(product_number, "Creme Fraiche"), 45, 0), # Adding buffer before expiration
+#     buffer = ifelse(str_detect(product_number, "Basket"), 35, buffer),
+#     buffer = ifelse(str_detect(product_number, "Whey"), 21, buffer),
+#     buffer = ifelse(str_detect(product_number, "Ricotta WM 2-Pk 3.5lb"), 25, buffer),
+#     buffer = ifelse(str_detect(product_number, "Zuni Jersey Ricotta"), 25, buffer),
+#     buffer = ifelse(product_number == "Zuni Jersey Ricotta- 3.5lb Tub", 0, buffer),
+#     buffer = ifelse(str_detect(product_number, "Retail Crescenza"), 25, buffer),
+#     buffer = ifelse(str_detect(product_number, "Carmody"), 60, buffer),
+#     buffer = ifelse(str_detect(product_number, "Costco - 16/32oz Plain"), 45, buffer),
+#     buffer = ifelse(str_detect(product_number, "Fromage Blanc"), 45, buffer),
+#     buffer = ifelse(str_detect(product_number, "Yogurt"), 45, buffer),
+#     arrive_by = expiration - buffer
+#   ) %>%
+#   select(1:2, buffer, arrive_by, n) %>%
+#   # bind_rows(added_inventory) %>%
+#   arrange(arrive_by) # Arranging by arrive_by so that we are sure to remove the products that are closest to expiration first and we remove
+
+
+
+for (i in 1:nrow(dues)) {
+  if (!dues$product[i] %in% inv$product_number) { # If we don't have any of given product then we needed to make all that they are ordered
+    dues[i, "needed"] <- dues[i, "ordered"]
+  } else { # If we have some we needed to check how much we have, if it is too late to ship, and update our inventory
+    if (str_detect(dues$customer_name[i], "UNFI") & (dues$customer_name[i] %in% east_stores) & (str_detect(dues$product[i], "Yogurt"))) {
+      spec_inv <- inv %>%
+        filter(product_number == dues$product[i]) %>%
+        mutate(
+          buffer = 35,
+          arrive_by = expiration - buffer,
+          ship_by = as.Date(arrive_by) - dues$travel_time[[i]]
+        ) %>% 
+        filter(ship_by >= dues$date_due[i])
+    } else {
+      spec_inv <- inv %>%
+        filter(product_number == dues$product[i]) %>%
+        mutate(ship_by = as.Date(arrive_by) - dues$travel_time[[i]]) %>% 
+        filter(ship_by >= dues$date_due[i])
+    }
+    
+    rows <- which((inv$product_number == dues$product[i]) & (inv$arrive_by >= dues$date_due[i] + dues$travel_time[i]))
+
+    # I needed to update the inv
+    available <- sum(spec_inv$n) %>% round(2)
+    ordered <- dues$ordered[i] %>% round(2)
+    if (available >= ordered) { # If we have enough to fulfill order
+      dues[i, "needed"] <- 0
+      for (j in rows) {
+        amount <- inv$n[j]
+
+        inv[j, "n"] <- ifelse(amount > ordered, amount - ordered, 0) # Updating inventory sheet
+        ordered <- ifelse(ordered >= amount, ordered - amount, 0) # Updating a temperary variable as to not affect later
+      }
+    } else { # If we needed to make more to fulfill order
+      dues[i, "needed"] <- ordered - available
+      inv[rows, "n"] <- 0 # Updating the inventory sheet
+    }
+  }
+}
+
+dues <- dues %>%
+  group_by(product, date_due) %>%
+  summarise(ordered = sum(ordered), needed = sum(needed)) %>%
+  ungroup() %>%
+  mutate(
+    remaining = NA,
+    expired = NA,
+  ) %>%
+  filter(date_due >= as.Date(start_date))
+
+dues <- dues %>% filter(
+  product != "Carmody",
+  product != "1/4 Carmody Wheel",
+  product != "Pepato",
+  product != "Pepato Wheel 1/4",
+  product != "San Andreas",
+  product != "San Andreas Wheel 1/4"
+)
+inv <- inv %>% filter(
+  product_number != "Carmody",
+  product_number != "1/4 Carmody Wheel",
+  product_number != "Pepato",
+  product_number != "Pepato Wheel 1/4",
+  product_number != "San Andreas",
+  product_number != "San Andreas Wheel 1/4"
+)
+
+shipping_today <- hand %>% 
+  filter(location == "Creamery - Shipping") %>% 
+  mutate(
+    exp = as.Date(substr(tracking, str_length(tracking) - 11, str_length(tracking))),
+    buffer = exp - lubridate::today()
+  ) %>% 
+  left_join(inv %>% select(product_number, buffer_cur = buffer), by = "product_number") %>% 
+  unique()
+noquote(paste("ERROR: There are", nrow(shipping_today %>% filter(buffer < buffer_cur)), "shipments being shipped too late."))
+orders_today <- order %>% filter(date_due == start_date)
+
+num_shipping <- shipping_today %>%
+  pull(qty) %>%
+  sum()
+num_orders_today <- orders_today %>%
+  pull(qty_remaining) %>%
+  sum()
+
+noquote(paste("Number of shipments in inventory:", num_shipping))
+noquote(paste("Number of shipments in orders:", num_orders_today))
+```
+##### Inventory updated as of `r most_recent_hand_date`
+## Most Urgent Items
+```{r}
+# dues %>%
+#   group_by(product) %>%
+#   summarise(ordered = sum(ordered), needed = sum(needed)) %>%
+#   arrange(desc(needed))
+
+# Table for items that we don't have for today
+today_orders <- dues %>%
+  filter(needed > 0 & date_due == start_date)
+
+
+# Table for items that we don't have for tomorrow
+tomorrow <- lubridate::as_date(ifelse(lubridate::wday(start_date) == 6, as.Date(start_date) + 3, as.Date(start_date) + 1))
+tomorrow_orders <- dues %>%
+  filter(
+    needed > 0,
+    date_due == tomorrow
+  ) %>%
+  arrange(desc(needed))
+
+overmorrow <- lubridate::as_date(ifelse(lubridate::wday(tomorrow) == 6, lubridate::as_date(tomorrow) + 3, lubridate::as_date(tomorrow + 1)))
+overmorrow_orders <- dues %>%
+  filter(
+    needed > 0,
+    date_due == overmorrow
+  ) %>%
+  arrange(desc(needed))
+
+combined <- bind_rows(today_orders, tomorrow_orders, overmorrow_orders) %>%
+    arrange(date_due, desc(needed)) %>%
+    select(product, date_due, ordered, needed) %>%
+    filter(!str_detect(product, "SAMPLE"))
+if (nrow(combined) == 0) {
+  noquote("No Urgent Items")
+} else {
+knitr::kable(
+  bind_rows(today_orders, tomorrow_orders, overmorrow_orders) %>%
+    arrange(date_due, desc(needed)) %>%
+    select(product, date_due, ordered, needed) %>%
+    filter(!str_detect(product, "SAMPLE"))
+) %>% 
+  column_spec(4, bold=TRUE) %>% 
+  kableExtra::kable_styling(font_size = NULL)
+}
+```
+
+```{r}
+this_monday <- as_date(ifelse(wday(start_date, label = TRUE) <= "Wed", start_date + 2 - wday(start_date), start_date + 9 - wday(start_date)))
+this_tuesday <-  this_monday + 1
+this_wednesday <- this_monday + 2
+this_thursday <- this_monday + 3
+this_friday <- this_monday + 4
+
+next_monday <- this_monday + 7
+next_tuesday <- next_monday + 1
+next_wednesday <- next_monday + 2
+next_thursday <- next_monday + 3
+next_friday <- next_monday + 4
+```
+## This Week
+#### `r this_monday` to `r this_friday`
+```{r message=FALSE}
+temp_dues <- dues %>% filter(needed != 0, str_detect(product, "SAMPLE", negate = TRUE)) %>% arrange(desc(needed))
+
+this_monday_dues <- temp_dues %>%
+  filter(date_due == this_monday) %>%
+  select(product, ordered, needed)
+this_tuesday_dues <- temp_dues %>%
+  filter(date_due == this_tuesday) %>%
+  select(product, ordered, needed)
+this_wednesday_dues <- temp_dues %>%
+  filter(date_due == this_wednesday) %>%
+  select(product, ordered, needed)
+this_thursday_dues <- temp_dues %>%
+  filter(date_due == this_thursday) %>%
+  select(product, ordered, needed)
+this_friday_dues <- temp_dues %>%
+  filter(date_due == this_friday) %>%
+  select(product, ordered, needed)
+
+max_rows <- max(nrow(this_monday_dues), nrow(this_tuesday_dues), nrow(this_wednesday_dues), nrow(this_thursday_dues), nrow(this_friday_dues)) + 1
+add_to_mon <- max_rows - nrow(this_monday_dues)
+add_to_tue <- max_rows - nrow(this_tuesday_dues)
+add_to_wed <- max_rows - nrow(this_wednesday_dues)
+add_to_thur <- max_rows - nrow(this_thursday_dues)
+add_to_fri <-  max_rows - nrow(this_friday_dues)
+
+this_monday_dues <- this_monday_dues %>% add_row(tibble(.rows = add_to_mon))
+this_tuesday_dues <- this_tuesday_dues %>% add_row(tibble(.rows = add_to_tue))
+this_wednesday_dues <- this_wednesday_dues %>% add_row(tibble(.rows = add_to_wed))
+this_thursday_dues <- this_thursday_dues %>% add_row(tibble(.rows = add_to_thur))
+this_friday_dues <- this_friday_dues %>% add_row(tibble(.rows = add_to_fri))
+combined <- dplyr::bind_cols(this_monday_dues, this_tuesday_dues, this_wednesday_dues, this_thursday_dues, this_friday_dues)
+
+knitr::kable(combined, col.names = rep(c("Product", "Ordered", "Needed"), 5), format = "html") %>%
+  kableExtra::add_header_above(c("Monday" = 3, "Tuesday" = 3, "Wednesday" = 3, "Thursday" = 3, "Friday" = 3)) %>%
+  kableExtra::kable_styling(font_size = 12) %>% 
+  column_spec(3, bold = TRUE) %>% 
+  column_spec(6, bold = TRUE) %>% 
+  column_spec(9, bold = TRUE) %>% 
+  column_spec(12, bold = TRUE) %>% 
+  column_spec(15, bold = TRUE)
+```
+
+
+
+## Next Week
+#### `r next_monday` to `r next_friday`
+```{r message=FALSE}
+next_monday_dues <- temp_dues %>%
+  filter(date_due == next_monday) %>%
+  select(product, ordered, needed)
+next_tuesday_dues <- temp_dues %>%
+  filter(date_due == next_tuesday) %>%
+  select(product, ordered, needed)
+next_wednesday_dues <- temp_dues %>%
+  filter(date_due == next_wednesday) %>%
+  select(product, ordered, needed)
+next_thursday_dues <- temp_dues %>%
+  filter(date_due == next_thursday) %>%
+  select(product, ordered, needed)
+next_friday_dues <- temp_dues %>%
+  filter(date_due == next_friday) %>%
+  select(product, ordered, needed)
+
+max_rows <- max(nrow(next_monday_dues), nrow(next_tuesday_dues), nrow(next_wednesday_dues), nrow(next_thursday_dues), nrow(next_friday_dues)) + 1
+add_to_mon <- max_rows - nrow(next_monday_dues)
+add_to_tue <- max_rows - nrow(next_tuesday_dues)
+add_to_wed <- max_rows - nrow(next_wednesday_dues)
+add_to_thur <- max_rows - nrow(next_thursday_dues)
+add_to_fri <-  max_rows - nrow(next_friday_dues)
+
+next_monday_dues <- next_monday_dues %>% add_row(tibble(.rows = add_to_mon))
+next_tuesday_dues <- next_tuesday_dues %>% add_row(tibble(.rows = add_to_tue))
+next_wednesday_dues <- next_wednesday_dues %>% add_row(tibble(.rows = add_to_wed))
+next_thursday_dues <- next_thursday_dues %>% add_row(tibble(.rows = add_to_thur))
+next_friday_dues <- next_friday_dues %>% add_row(tibble(.rows = add_to_fri))
+combined <- dplyr::bind_cols(next_monday_dues, next_tuesday_dues, next_wednesday_dues, next_thursday_dues, next_friday_dues)
+
+knitr::kable(combined, col.names = rep(c("Product", "Ordered", "Needed"), 5), format = "html") %>%
+  kableExtra::add_header_above(c("Monday" = 3, "Tuesday" = 3, "Wednesday" = 3, "Thursday" = 3, "Friday" = 3)) %>%
+  kableExtra::kable_styling(font_size = 12) %>% 
+  column_spec(3, bold = TRUE) %>% 
+  column_spec(6, bold = TRUE) %>% 
+  column_spec(9, bold = TRUE) %>% 
+  column_spec(12, bold = TRUE) %>% 
+  column_spec(15, bold = TRUE)
+
+```
+
+
+
+## Carmody Retail
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Carmody")) %>%
+  add_row(
+    product = "All Carmody Retail",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Carmody retail"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Carmody retail"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>% 
+  kableExtra::kable_styling(font_size = NULL) %>% 
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Creme Fraiche
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Creme Fraiche") | str_detect(product, "CF")) %>%
+  add_row(
+    product = "All Creme Fraiche",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Creme Fraiche") | str_detect(product_number, "CF"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Creme Fraiche") | str_detect(product_number, "CF"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Creme Fraiche 9-5oz
+```{r}
+cf_9_5oz <- dues %>%
+  filter(product == "Creme Fraiche 9-5oz") %>%
+  add_row(
+    product = "All Creme Fraiche 9-5oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Creme Fraiche 9-5oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Creme Fraiche 9-5oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )
+knitr::kable(cf_9_5oz) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Creme Fraiche 8-7.5oz
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Creme Fraiche 8-7.5oz") %>%
+  add_row(
+    product = "All Creme Fraiche 8-7.5oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Creme Fraiche 8-7.5oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Creme Fraiche 8-7.5oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Creme Fraiche TJ 12 7.5oz
+```{r}
+cf_12_7.5 <- dues %>%
+  filter(product == "Creme Fraiche TJ 12 7.5oz") %>%
+  add_row(
+    product = "All Creme Fraiche TJ 12 7.5oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Creme Fraiche TJ 12 7.5oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Creme Fraiche TJ 12 7.5oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )
+knitr::kable(cf_12_7.5) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Costco - Creme Fraiche 16oz
+```{r}
+cf_costco_16 <- dues %>%
+  filter(product == "Costco - Creme Fraiche 16oz") %>%
+  add_row(
+    product = "All Costco - Creme Fraiche 16oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Costco - Creme Fraiche 16oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Costco - Creme Fraiche 16oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )
+knitr::kable(cf_costco_16) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Creme Fraiche 2-2lb
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Creme Fraiche 2-2lb") %>%
+  add_row(
+    product = "All Creme Fraiche 2-2lb",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Creme Fraiche 2-2lb", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Creme Fraiche 2-2lb", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Creme Fraiche Bucket
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Creme Fraiche Bucket") %>%
+  add_row(
+    product = "All Creme Fraiche Bucket",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Creme Fraiche Bucket", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Creme Fraiche Bucket", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Creme Fraiche
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c("Creme Fraiche 9-5oz", "Creme Fraiche 8-7.5oz", "Creme Fraiche TJ 12 7.5oz", "Costco - Creme Fraiche 16oz", "Creme Fraiche 2-2lb", "Creme Fraiche Bucket"),
+    str_detect(product, "Creme Fraiche") | str_detect(product, "CF")
+  ) %>%
+  add_row(
+    product = "All Other Creme Fraiche",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c("Creme Fraiche 9-5oz", "Creme Fraiche 8-7.5oz", "Creme Fraiche TJ 12 7.5oz", "Costco - Creme Fraiche 16oz", "Creme Fraiche 2-2lb", "Creme Fraiche Bucket"),
+      str_detect(product_number, "Creme Fraiche") | str_detect(product_number, "CF"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c("Creme Fraiche 9-5oz", "Creme Fraiche 8-7.5oz", "Creme Fraiche TJ 12 7.5oz", "Costco - Creme Fraiche 16oz", "Creme Fraiche 2-2lb", "Creme Fraiche Bucket"),
+      str_detect(product_number, "Creme Fraiche") | str_detect(product_number, "CF"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Crescenza
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Crescenza")) %>%
+  add_row(
+    product = "All Crescenza",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Crescenza"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Crescenza"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Fromage Blanc
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Fromage Blanc") | str_detect(product, "FB")) %>%
+  add_row(
+    product = "All Fromage Blanc",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Fromage Blanc") | str_detect(product_number, "FB"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Fromage Blanc") | str_detect(product_number, "FB"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Fromage Blanc 8-7.5oz
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Fromage Blanc 8-7.5oz") %>%
+  add_row(
+    product = "All Fromage Blanc 8-7.5oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Fromage Blanc 8-7.5oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Fromage Blanc 8-7.5oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Fromage Blanc 2-30oz
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Fromage Blanc 2-30oz") %>%
+  add_row(
+    product = "All Fromage Blanc 2-30oz",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Fromage Blanc 2-30oz", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Fromage Blanc 2-30oz", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Fromage Blanc
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c("Fromage Blanc 8-7.5oz", "Fromage Blanc 2-30oz"),
+    str_detect(product, "Fromage Blanc") | str_detect(product, "FB")
+  ) %>%
+  add_row(
+    product = "All Other Fromage Blanc",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c("Fromage Blanc 8-7.5oz", "Fromage Blanc 2-30oz"),
+      str_detect(product_number, "Fromage Blanc") | str_detect(product_number, "FB"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c("Fromage Blanc 8-7.5oz", "Fromage Blanc 2-30oz"),
+      str_detect(product_number, "Fromage Blanc") | str_detect(product_number, "FB"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Jersey Whey Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Jersey")) %>%
+  add_row(
+    product = "All Jersey Whey Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Jersey"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Jersey"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta Jersey Whey 2-Pk 3.5lb
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Ricotta Jersey Whey 2-Pk 3.5lb") %>%
+  add_row(
+    product = "All Ricotta Jersey Whey 2-Pk 3.5lb",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta Jersey Whey 2-Pk 3.5lb", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta Jersey Whey 2-Pk 3.5lb", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta Jersey Whey Basket
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Ricotta Jersey Whey Basket") %>%
+  add_row(
+    product = "All Ricotta Jersey Whey Basket",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta Jersey Whey Basket", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta Jersey Whey Basket", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Jersey Whey Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c("Ricotta Jersey Whey 2-Pk 3.5lb", "Ricotta Jersey Whey Basket"),
+    str_detect(product, "Jersey")
+  ) %>%
+  add_row(
+    product = "All Other Jersey Whey Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c("Ricotta Jersey Whey 2-Pk 3.5lb", "Ricotta Jersey Whey Basket"),
+      str_detect(product_number, "Jersey"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c("Ricotta Jersey Whey 2-Pk 3.5lb", "Ricotta Jersey Whey Basket"),
+      str_detect(product_number, "Jersey"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Sheep Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Ricotta Sheep")) %>%
+  add_row(
+    product = "All Sheep Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Ricotta Sheep"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Ricotta Sheep"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta Sheep 6-12oz Basket
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Ricotta Sheep 6-12oz Basket") %>%
+  add_row(
+    product = "All Ricotta Sheep 6-12oz Basket",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta Sheep 6-12oz Basket", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta Sheep 6-12oz Basket", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta Sheep Whey 3.5lb Bulk 2
+```{r}
+knitr::kable(dues %>%
+  filter(product == "Ricotta Sheep Whey 3.5lb Bulk 2") %>%
+  add_row(
+    product = "All Ricotta Sheep Whey 3.5lb Bulk 2",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta Sheep Whey 3.5lb Bulk 2", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta Sheep Whey 3.5lb Bulk 2", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Sheep Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c("Ricotta Sheep Whey 3.5lb Bulk 2", "Ricotta Sheep 6-12oz Basket"),
+    str_detect(product, "Ricotta Sheep")
+  ) %>%
+  add_row(
+    product = "All Other Sheep Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c("Ricotta Sheep Whey 3.5lb Bulk 2", "Ricotta Sheep 6-12oz Basket"),
+      str_detect(product_number, "Ricotta Sheep"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c("Ricotta Sheep Whey 3.5lb Bulk 2", "Ricotta Sheep 6-12oz Basket"),
+      str_detect(product_number, "Ricotta Sheep"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Whole Milk Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Ricotta WM")) %>%
+  add_row(
+    product = "All Whole Milk Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Ricotta WM"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Ricotta WM"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta WM 6-12.oz Basket
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Ricotta WM 6-12.oz Basket")) %>%
+  add_row(
+    product = "All Ricotta WM 6-12.oz Basket",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta WM 6-12.oz Basket", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta WM 6-12.oz Basket", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Ricotta WM 2-Pk 3.5lb
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Ricotta WM 2-Pk 3.5lb")) %>%
+  add_row(
+    product = "All Ricotta WM 2-Pk 3.5lb",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(product_number == "Ricotta WM 2-Pk 3.5lb", arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(product_number == "Ricotta WM 2-Pk 3.5lb", arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Whole Milk Ricotta
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c("Ricotta WM 6-12.oz Basket", "Ricotta WM 2-Pk 3.5lb"),
+    str_detect(product, "Ricotta WM")
+  ) %>%
+  add_row(
+    product = "All Other Whole Milk Ricotta",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c("Ricotta WM 6-12.oz Basket", "Ricotta WM 2-Pk 3.5lb"),
+      str_detect(product_number, "Ricotta WM"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c("Ricotta WM 6-12.oz Basket", "Ricotta WM 2-Pk 3.5lb"),
+      str_detect(product_number, "Ricotta WM"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Cow Yogurt
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "cow") | str_detect(product, "Cow") | str_detect(product, "Costco - 16/32oz Plain")) %>%
+  add_row(
+    product = "All Cow Yogurt",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "cow") | str_detect(product_number, "Cow") | str_detect(product_number, "Costco - 16/32oz Plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "cow") | str_detect(product_number, "Cow") | str_detect(product_number, "Costco - 16/32oz Plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz apple
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz apple")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz apple",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz apple"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz apple"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz black
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz black")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz black",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz black"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz black"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz blue
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz blue")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz blue",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz blue"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz blue"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz plain")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz straw
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz straw")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz straw",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz straw"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz straw"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6/4 3.75 oz van
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6/4 3.75 oz van")) %>%
+  add_row(
+    product = "All Yogurt - cow 6/4 3.75 oz van",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz van"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6/4 3.75 oz van"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz apple
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz apple")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz apple",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz apple"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz apple"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz black
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz black")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz black",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz black"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz black"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz blue
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz blue")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz blue",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz blue"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz blue"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz plain")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz straw
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz straw")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz straw",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz straw"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz straw"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 12 5.3oz vanilla
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 12 5.3oz vanilla")) %>%
+  add_row(
+    product = "All Yogurt - cow 12 5.3oz vanilla",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz vanilla"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 12 5.3oz vanilla"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6-32oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6-32oz plain")) %>%
+  add_row(
+    product = "All Yogurt - cow 6-32oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6-32oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6-32oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - cow 6-32oz vanilla
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - cow 6-32oz vanilla")) %>%
+  add_row(
+    product = "All Yogurt - cow 6-32oz vanilla",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - cow 6-32oz vanilla"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - cow 6-32oz vanilla"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Costco - 16/32oz Plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Costco - 16/32oz Plain")) %>%
+  add_row(
+    product = "All Costco - 16/32oz Plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Costco - 16/32oz Plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Costco - 16/32oz Plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Cow Yogurt
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c(
+      "Costco - 16/32oz Plain", "Yogurt - cow 12 5.3oz apple", "Yogurt - cow 6/4 3.75 oz apple", "Yogurt - cow 6/4 3.75 oz black", "Yogurt - cow 6/4 3.75 oz blue", "Yogurt - cow 6/4 3.75 oz plain", "Yogurt - cow 6/4 3.75 oz straw",
+      "Yogurt - cow 6/4 3.75 oz van", "Yogurt - cow 12 5.3oz black", "Yogurt - cow 12 5.3oz blue", "Yogurt - cow 12 5.3oz plain",
+      "Yogurt - cow 12 5.3oz straw", "Yogurt - cow 12 5.3oz vanilla", "Yogurt - cow 6-32oz plain", "Yogurt - cow 6-32oz vanilla"
+    ),
+    str_detect(product, "cow") | str_detect(product, "Cow") | str_detect(product, "OCY"),
+  ) %>%
+  add_row(
+    product = "All Other Cow Yogurt",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c(
+        "Costco - 16/32oz Plain", "Yogurt - cow 12 5.3oz apple", "Yogurt - cow 6/4 3.75 oz black", "Yogurt - cow 6/4 3.75 oz blue", "Yogurt - cow 6/4 3.75 oz plain", "Yogurt - cow 6/4 3.75 oz straw",
+        "Yogurt - cow 6/4 3.75 oz van", "Yogurt - cow 12 5.3oz black", "Yogurt - cow 12 5.3oz blue", "Yogurt - cow 12 5.3oz plain",
+        "Yogurt - cow 12 5.3oz straw", "Yogurt - cow 12 5.3oz vanilla", "Yogurt - cow 6-32oz plain", "Yogurt - cow 6-32oz vanilla"
+      ),
+      str_detect(product_number, "cow") | str_detect(product_number, "Cow") | str_detect(product_number, "OCY"),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c(
+        "Costco - 16/32oz Plain", "Yogurt - cow 12 5.3oz apple", "Yogurt - cow 6/4 3.75 oz black", "Yogurt - cow 6/4 3.75 oz blue", "Yogurt - cow 6/4 3.75 oz plain", "Yogurt - cow 6/4 3.75 oz straw",
+        "Yogurt - cow 6/4 3.75 oz van", "Yogurt - cow 12 5.3oz black", "Yogurt - cow 12 5.3oz blue", "Yogurt - cow 12 5.3oz plain",
+        "Yogurt - cow 12 5.3oz straw", "Yogurt - cow 12 5.3oz vanilla", "Yogurt - cow 6-32oz plain", "Yogurt - cow 6-32oz vanilla"
+      ),
+      str_detect(product_number, "cow") | str_detect(product_number, "Cow") | str_detect(product_number, "OCY"),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+
+*****
+## Sheep Yogurt
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "sheep") | str_detect(product, "Sheep"), str_detect(product, "Ricotta", negate = TRUE)) %>%
+  add_row(
+    product = "All Sheep Yogurt",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "sheep") | str_detect(product_number, "Sheep"), str_detect(product_number, "Ricotta", negate = TRUE), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "sheep") | str_detect(product_number, "Sheep"), str_detect(product_number, "Ricotta", negate = TRUE), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  ) %>%
+  tail(1)) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 12-6oz black
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 12-6oz black")) %>%
+  add_row(
+    product = "All Yogurt - sheep 12-6oz black",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz black"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz black"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 12-6oz blue
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 12-6oz blue")) %>%
+  add_row(
+    product = "All Yogurt - sheep 12-6oz blue",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz blue"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz blue"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 12-6oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 12-6oz plain")) %>%
+  add_row(
+    product = "All Yogurt - sheep 12-6oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 12-6oz straw
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 12-6oz straw")) %>%
+  add_row(
+    product = "All Yogurt - sheep 12-6oz straw",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz straw"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz straw"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 12-6oz van
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 12-6oz van")) %>%
+  add_row(
+    product = "All Yogurt - sheep 12-6oz van",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz van"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 12-6oz van"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 6-16oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 6-16oz plain")) %>%
+  add_row(
+    product = "All Yogurt - sheep 6-16oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 6-16oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 6-16oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 6-16oz vanilla
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 6-16oz vanilla")) %>%
+  add_row(
+    product = "All Yogurt - sheep 6-16oz vanilla",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - sheep 6-16oz vanilla"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - sheep 6-16oz vanilla"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - Grocery O sheep 12-16oz Plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - Grocery O sheep 12-16oz Plain")) %>%
+  add_row(
+    product = "All Yogurt - Grocery O sheep 12-16oz Plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - Grocery O sheep 12-16oz Plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - Grocery O sheep 12-16oz Plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - Grocery O sheep 12-16oz vanilla
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - Grocery O sheep 12-16oz vanilla")) %>%
+  add_row(
+    product = "All Yogurt - Grocery O sheep 12-16oz vanilla",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - Grocery O sheep 12-16oz vanilla"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - Grocery O sheep 12-16oz vanilla"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Yogurt - sheep 4-32oz plain
+```{r}
+knitr::kable(dues %>%
+  filter(str_detect(product, "Yogurt - sheep 4-32oz plain")) %>%
+  add_row(
+    product = "All Yogurt - sheep 4-32oz plain",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(str_detect(product_number, "Yogurt - Yogurt - sheep 4-32oz plain"), arrive_by >= tomorrow) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(str_detect(product_number, "Yogurt - Yogurt - sheep 4-32oz plain"), arrive_by < tomorrow) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
+### Other Sheep Yogurt
+```{r}
+knitr::kable(dues %>%
+  filter(
+    !product %in% c(
+      "Yogurt - Grocery O sheep 12-16oz Plain", "Yogurt - Grocery O sheep 12-16oz vanilla", "Yogurt - sheep 12-6oz black", "Yogurt - sheep 12-6oz blue", "Yogurt - sheep 12-6oz plain", "Yogurt - sheep 12-6oz straw",
+      "Yogurt - sheep 12-6oz van", "Yogurt - sheep 6-16oz plain", "Yogurt - sheep 6-16oz vanilla", "Yogurt - sheep 4-32oz plain"
+    ),
+    str_detect(product, "sheep") | str_detect(product, "Sheep"),
+    str_detect(product, "Ricotta", negate = TRUE)
+  ) %>%
+  add_row(
+    product = "All Other Sheep Yogurt",
+    ordered = sum(.$ordered),
+    needed = sum(.$needed),
+    remaining = inv %>% filter(
+      !product_number %in% c(
+        "Yogurt - Grocery O sheep 12-16oz Plain", "Yogurt - Grocery O sheep 12-16oz vanilla", "Yogurt - sheep 12-6oz black", "Yogurt - sheep 12-6oz blue", "Yogurt - sheep 12-6oz plain", "Yogurt - sheep 12-6oz straw",
+        "Yogurt - sheep 12-6oz van", "Yogurt - sheep 6-16oz plain", "Yogurt - sheep 6-16oz vanilla", "Yogurt - sheep 4-32oz plain"
+      ),
+      str_detect(product_number, "sheep") | str_detect(product_number, "Sheep"),
+      str_detect(product_number, "Ricotta", negate = TRUE),
+      arrive_by >= tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n),
+    expired = inv %>% filter(
+      !product_number %in% c(
+        "Yogurt - Grocery O sheep 12-16oz Plain", "Yogurt - Grocery O sheep 12-16oz vanilla", "Yogurt - sheep 12-6oz black", "Yogurt - sheep 12-6oz blue", "Yogurt - sheep 12-6oz plain", "Yogurt - sheep 12-6oz straw",
+        "Yogurt - sheep 12-6oz van", "Yogurt - sheep 6-16oz plain", "Yogurt - sheep 6-16oz vanilla", "Yogurt - sheep 4-32oz plain"
+      ),
+      str_detect(product_number, "sheep") | str_detect(product_number, "Sheep"),
+      str_detect(product_number, "Ricotta", negate = TRUE),
+      arrive_by < tomorrow
+    ) %>% summarise(n = sum(n)) %>% pull(n)
+  )) %>%
+  kableExtra::kable_styling(font_size = NULL) %>%
+  kableExtra::column_spec(4, bold = TRUE)
+```
